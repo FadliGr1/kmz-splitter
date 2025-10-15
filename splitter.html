@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>KMZ Splitter Pro – Mode Pintar</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f9fafb;
+        }
+
+        .container {
+            max-width: 650px;
+            margin: auto;
+            background: #fff;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        button {
+            background: #4f46e5;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            background: #a5b4fc;
+            cursor: not-allowed;
+        }
+
+        #progressBar {
+            width: 100%;
+            background: #e5e7eb;
+            border-radius: 6px;
+            overflow: hidden;
+            margin-top: 10px;
+            height: 16px;
+        }
+
+        #progressFill {
+            width: 0%;
+            height: 100%;
+            background: #4f46e5;
+            transition: width 0.3s ease;
+        }
+
+        #log {
+            max-height: 200px;
+            overflow-y: auto;
+            background: #f3f4f6;
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+
+        .spinner {
+            display: none;
+            margin: 10px auto;
+            width: 40px;
+            height: 40px;
+            border: 5px solid #e5e7eb;
+            border-top-color: #4f46e5;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h2>KMZ Splitter Pro – Mode Pintar</h2>
+        <p>Pecah file KMZ besar menjadi beberapa KMZ kecil.
+            <br>Hanya foto/folder yang dipakai pada chunk tersebut yang ikut disalin.
+        </p>
+        <input type="file" id="kmzFile" accept=".kmz"><br><br>
+        <label>Jumlah Placemark per file:
+            <input type="number" id="chunkSize" value="100">
+        </label>
+        <br><br>
+        <button id="splitBtn" onclick="splitKMZ()">Pecah KMZ</button>
+        <div class="spinner" id="spinner"></div>
+        <div id="progressBar">
+            <div id="progressFill"></div>
+        </div>
+        <div id="log"></div>
+    </div>
+
+    <script>
+        async function splitKMZ() {
+            const fileInput = document.getElementById('kmzFile');
+            const chunkSize = parseInt(document.getElementById('chunkSize').value);
+            const log = document.getElementById('log');
+            const spinner = document.getElementById('spinner');
+            const progressFill = document.getElementById('progressFill');
+            const splitBtn = document.getElementById('splitBtn');
+
+            log.innerHTML = '';
+            progressFill.style.width = '0%';
+
+            if (!fileInput.files.length) {
+                alert("Upload file KMZ dulu");
+                return;
+            }
+            const file = fileInput.files[0];
+
+            spinner.style.display = 'block';
+            splitBtn.disabled = true;
+            logMessage("Membaca file: " + file.name);
+
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const zip = await JSZip.loadAsync(arrayBuffer);
+                const kmlFile = zip.file(/.kml$/i)[0];
+                if (!kmlFile) throw new Error("Tidak ada file KML di KMZ");
+
+                const kmlText = await kmlFile.async('string');
+                const parser = new DOMParser();
+                const xmlDoc = parser.parseFromString(kmlText, 'text/xml');
+                const placemarks = Array.from(xmlDoc.getElementsByTagName('Placemark'));
+                if (placemarks.length === 0) throw new Error("Tidak ada Placemark di KML");
+
+                logMessage(`Total Placemark: ${placemarks.length}`);
+                let index = 0;
+
+                for (let i = 0; i < placemarks.length; i += chunkSize) {
+                    const chunk = placemarks.slice(i, i + chunkSize);
+
+                    // buat dokumen baru
+                    const newDoc = xmlDoc.cloneNode(true);
+                    Array.from(newDoc.getElementsByTagName('Placemark')).forEach(pm => pm.parentNode.removeChild(pm));
+                    const folder = newDoc.getElementsByTagName('Document')[0] || newDoc.getElementsByTagName('kml')[0];
+                    chunk.forEach(pm => folder.appendChild(pm.cloneNode(true)));
+
+                    // cari semua file path/href yang dipakai chunk
+                    const hrefs = [];
+                    chunk.forEach(pm => {
+                        // <href>
+                        const hrefNodes = pm.getElementsByTagName('href');
+                        for (let h of hrefNodes) {
+                            hrefs.push(h.textContent.trim());
+                        }
+                        // <img src="..."> di description
+                        const desc = pm.getElementsByTagName('description')[0];
+                        if (desc) {
+                            const matches = desc.textContent.match(/src=["']([^"']+)["']/gi);
+                            if (matches) {
+                                matches.forEach(m => {
+                                    const path = m.match(/src=["']([^"']+)["']/i)[1];
+                                    hrefs.push(path.trim());
+                                });
+                            }
+                        }
+                    });
+
+                    // buat zip baru
+                    const newZip = new JSZip();
+                    const serializer = new XMLSerializer();
+                    const newKml = serializer.serializeToString(newDoc);
+                    newZip.file("doc.kml", newKml);
+
+                    // copy hanya file yang dipakai chunk
+                    for (const relPath in zip.files) {
+                        if (relPath.toLowerCase().endsWith('.kml')) continue;
+                        // cek apakah file disebutkan di hrefs
+                        if (hrefs.some(h => relPath.includes(h) || relPath.endsWith(h))) {
+                            newZip.file(relPath, zip.files[relPath].async('arraybuffer'));
+                        }
+                    }
+
+                    const blob = await newZip.generateAsync({ type: "blob" });
+                    const a = document.createElement("a");
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `split_${++index}.kmz`;
+                    a.click();
+
+                    const percent = Math.min(((i + chunkSize) / placemarks.length) * 100, 100);
+                    progressFill.style.width = percent + '%';
+                    logMessage(`Chunk ${index} selesai → ${chunk.length} placemark, foto yang direferensikan ikut disalin`);
+                }
+                logMessage(`Selesai! Terbentuk ${index} file KMZ lebih kecil (foto tetap ada sesuai chunk)`);
+            } catch (err) {
+                logMessage("Error: " + err.message);
+            } finally {
+                spinner.style.display = 'none';
+                splitBtn.disabled = false;
+                progressFill.style.width = '100%';
+            }
+
+            function logMessage(msg) {
+                log.innerHTML += msg + "<br>";
+                log.scrollTop = log.scrollHeight;
+            }
+        }
+    </script>
+</body>
+
+</html>

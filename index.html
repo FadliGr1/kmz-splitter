@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="id">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>KMZ Fixer — Analisis & Perbaikan KMZ/KML</title>
+    <style>
+        :root {
+            --bg: #0f1724;
+            --card: #0b1220;
+            --muted: #94a3b8;
+            --accent: #06b6d4
+        }
+
+        * {
+            box-sizing: border-box
+        }
+
+        body {
+            font-family: Inter, ui-sans-serif, system-ui, Segoe UI, Roboto, "Helvetica Neue", Arial;
+            background: linear-gradient(180deg, #061123 0%, #071826 100%);
+            color: #e6eef6;
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 28px
+        }
+
+        .wrap {
+            width: 100%;
+            max-width: 980px;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01));
+            border-radius: 12px;
+            padding: 18px;
+            box-shadow: 0 8px 30px rgba(2, 6, 23, 0.6)
+        }
+
+        h1 {
+            margin: 0 0 6px;
+            font-size: 20px
+        }
+
+        p.lead {
+            margin: 0 0 12px;
+            color: var(--muted);
+            font-size: 13px
+        }
+
+        .uploader {
+            display: flex;
+            gap: 12px;
+            align-items: flex-start
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.02);
+            padding: 14px;
+            border-radius: 10px;
+            flex: 1
+        }
+
+        .drop {
+            border: 2px dashed rgba(255, 255, 255, 0.04);
+            padding: 18px;
+            border-radius: 8px;
+            text-align: center;
+            cursor: pointer
+        }
+
+        input[type=file] {
+            display: none
+        }
+
+        .controls {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px
+        }
+
+        button {
+            background: var(--accent);
+            border: none;
+            padding: 8px 12px;
+            border-radius: 8px;
+            color: #021224;
+            cursor: pointer;
+            font-weight: 600
+        }
+
+        button.secondary {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            color: var(--muted)
+        }
+
+        .log {
+            margin-top: 12px;
+            background: rgba(2, 6, 23, 0.6);
+            padding: 10px;
+            border-radius: 8px;
+            max-height: 300px;
+            overflow: auto;
+            font-family: monospace;
+            font-size: 13px;
+            color: #cfeff6
+        }
+
+        .progress {
+            height: 10px;
+            background: rgba(255, 255, 255, 0.04);
+            border-radius: 99px;
+            overflow: hidden;
+            margin-top: 10px
+        }
+
+        .progress>i {
+            display: block;
+            height: 100%;
+            width: 0;
+            background: linear-gradient(90deg, var(--accent), #60a5fa)
+        }
+
+        .right {
+            width: 360px
+        }
+
+        .meta {
+            font-size: 13px;
+            color: var(--muted);
+            margin-bottom: 8px
+        }
+
+        .summary {
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.01), transparent);
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 13px;
+            color: var(--muted)
+        }
+
+        a.small {
+            font-size: 13px;
+            color: var(--accent);
+            text-decoration: none
+        }
+
+        footer {
+            margin-top: 12px;
+            color: var(--muted);
+            font-size: 12px
+        }
+    </style>
+</head>
+
+<body>
+    <div class="wrap">
+        <h1>KMZ Fixer — Analisis & Perbaikan Otomatis</h1>
+        <p class="lead">Upload file KMZ yang bermasalah; skrip akan mencoba menemukan penyebab (struktur, nama KML,
+            gambar, nested zip, karakter tidak valid) dan memperbaikinya lalu berikan KMZ yang sudah diperbaiki.</p>
+
+        <div class="uploader">
+            <div class="card">
+                <div class="drop" id="drop">Klik atau tarik file KMZ di sini<br><small class="meta">Mendukung .kmz .zip
+                        (KMZ adalah ZIP)</small></div>
+                <input id="fileinput" type="file" accept=".kmz,.zip" />
+                <div class="controls">
+                    <button id="analyze" disabled>Analisis & Perbaiki</button>
+                    <button id="download" class="secondary" disabled>Download Fixed KMZ</button>
+                    <button id="showlog" class="secondary">Salin Log</button>
+                </div>
+                <div class="progress" aria-hidden><i id="bar"></i></div>
+                <div class="log" id="log" aria-live="polite"></div>
+            </div>
+
+            <div class="right">
+                <div class="summary" id="summary">
+                    <strong>Ringkasan Hasil</strong>
+                    <div id="summaryBody" style="margin-top:8px;color:var(--muted)">Belum ada file diupload.</div>
+                </div>
+                <div style="height:10px"></div>
+                <div class="summary">
+                    <strong>Fitur</strong>
+                    <ul style="padding-left:18px;margin:8px 0;color:var(--muted);font-size:13px">
+                        <li>Mendeteksi doc.kml yang hilang / kml bernama lain</li>
+                        <li>Mendeteksi nested zip / double-compressed KMZ</li>
+                        <li>Memindahkan photo ke folder <code>files/</code> dan memperbarui <code>&lt;href&gt;</code>
+                        </li>
+                        <li>Membersihkan karakter XML yang tidak valid</li>
+                        <li>Menambah placeholder Placemark jika KML kosong</li>
+                        <li>Menghasilkan ulang KMZ & menyediakan link download</li>
+                    </ul>
+                </div>
+                <footer>Catatan: file besar memerlukan memori; untuk KMZ sangat besar, gunakan versi server-side.
+                </footer>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script>
+        // Utility: log
+        const logEl = document.getElementById('log');
+        function log(t) {
+            const time = new Date().toLocaleTimeString();
+            logEl.innerText = `[${time}] ${t}\n` + logEl.innerText;
+        }
+
+        const drop = document.getElementById('drop');
+        const input = document.getElementById('fileinput');
+        const analyzeBtn = document.getElementById('analyze');
+        const downloadBtn = document.getElementById('download');
+        const bar = document.getElementById('bar');
+        const summaryBody = document.getElementById('summaryBody');
+
+        let lastFixedBlob = null;
+        let lastReport = null;
+
+        function setProgress(p) { bar.style.width = Math.max(0, Math.min(100, p)) + '%'; }
+
+        drop.addEventListener('click', () => input.click());
+        drop.addEventListener('dragover', e => { e.preventDefault(); drop.style.opacity = 0.9; });
+        drop.addEventListener('dragleave', e => { drop.style.opacity = 1; });
+        drop.addEventListener('drop', e => { e.preventDefault(); drop.style.opacity = 1; const f = e.dataTransfer.files[0]; if (f) handleFile(f); });
+        input.addEventListener('change', e => { const f = e.target.files[0]; if (f) handleFile(f); });
+
+        function handleFile(file) {
+            log('File diterima: ' + file.name + ' (' + Math.round(file.size / 1024) + ' KB)');
+            analyzeBtn.disabled = false;
+            summaryBody.innerHTML = `File: <strong>${escapeHtml(file.name)}</strong><br>Size: ${Math.round(file.size / 1024)} KB`;
+            window._kmzFile = file;
+            lastFixedBlob = null; downloadBtn.disabled = true;
+        }
+
+        analyzeBtn.addEventListener('click', () => { if (window._kmzFile) analyzeAndFix(window._kmzFile); });
+        downloadBtn.addEventListener('click', () => { if (lastFixedBlob) { const a = document.createElement('a'); a.href = URL.createObjectURL(lastFixedBlob); a.download = 'fixed-' + (window._kmzFile ? window._kmzFile.name.replace(/\.kmz|\.zip/i, '') : 'kmz') + '.kmz'; a.click(); log('Download dimulai: ' + a.download); } });
+
+        document.getElementById('showlog').addEventListener('click', () => { navigator.clipboard?.writeText(logEl.innerText).then(() => alert('Log disalin ke clipboard')); });
+
+        // Helpers
+        function escapeHtml(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+        // Remove invalid XML chars (per XML 1.0) https://www.w3.org/TR/xml/#charsets
+        function stripInvalidXmlChars(s) {
+            // allow: #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]
+            return s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, '');
+        }
+
+        async function analyzeAndFix(file) {
+            setProgress(0); log('Memulai analisis...');
+            summaryBody.innerHTML = 'Analisis berjalan...';
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                setProgress(5);
+                const zip = await JSZip.loadAsync(arrayBuffer);
+                setProgress(15);
+                log('KMZ dibuka sebagai ZIP. Jumlah entri: ' + Object.keys(zip.files).length);
+
+                // Helper untuk mencari file .kml
+                function findKmlEntry(z) {
+                    // Prefer doc.kml at root
+                    const keys = Object.keys(z.files);
+                    if (keys.includes('doc.kml')) return 'doc.kml';
+                    // otherwise first .kml
+                    for (const k of keys) { if (/\.kml$/i.test(k)) return k; }
+                    return null;
+                }
+
+                // Detect nested zip (double compressed)
+                let kmlPath = findKmlEntry(zip);
+                let nestedZipEntry = null;
+                if (!kmlPath) {
+                    // find any .kmz or .zip inside
+                    for (const k of Object.keys(zip.files)) {
+                        if (/\.kmz$/i.test(k) || /\.zip$/i.test(k)) {
+                            nestedZipEntry = k; break;
+                        }
+                    }
+                }
+
+                if (nestedZipEntry) {
+                    log('Nested archive terdeteksi: ' + nestedZipEntry + '. Meng-extract nested...');
+                    const nestedData = await zip.files[nestedZipEntry].async('arraybuffer');
+                    const nested = await JSZip.loadAsync(nestedData);
+                    log('Nested archive berhasil dibuka. Entri: ' + Object.keys(nested.files).length);
+                    // replace zip reference with nested
+                    // We'll work from nested as main archive
+                    processZip(nested, file.name);
+                } else if (kmlPath) {
+                    log('Menemukan KML: ' + kmlPath);
+                    processZip(zip, file.name);
+                } else {
+                    // no kml and no nested -> try to find any kml-like xml by content
+                    log('Tidak menemukan .kml maupun nested zip. Mencari file xml yang berpotensi KML...');
+                    let candidate = null;
+                    for (const k of Object.keys(zip.files)) {
+                        if (/\.xml$/i.test(k) || /\.txt$/i.test(k)) {
+                            candidate = k; break;
+                        }
+                    }
+                    if (candidate) {
+                        log('Menemukan kandidat: ' + candidate + '. Membaca dan mencari tag <kml>...');
+                        const txt = await zip.files[candidate].async('text');
+                        if (/<kml[\s>]/i.test(txt)) {
+                            log('Kandidat berisi <kml> — akan dipakai sebagai KML.');
+                            // create new in-memory zip with this as doc.kml
+                            const newZip = new JSZip();
+                            newZip.file('doc.kml', txt);
+                            // copy other files as-is
+                            for (const k of Object.keys(zip.files)) {
+                                if (k !== candidate) newZip.file(k, await zip.files[k].async('arraybuffer'));
+                            }
+                            processZip(newZip, file.name);
+                        } else {
+                            throw new Error('Tidak menemukan KML apapun di dalam KMZ.');
+                        }
+                    } else {
+                        throw new Error('Tidak menemukan KML apapun di dalam KMZ.');
+                    }
+                }
+
+            } catch (err) {
+                log('Error: ' + (err.message || err));
+                summaryBody.innerHTML = '<span style="color:#ffb4b4">Gagal: ' + escapeHtml(err.message || String(err)) + '</span>';
+                setProgress(0);
+            }
+        }
+
+        async function processZip(zip, originalName) {
+            setProgress(20);
+            // find kml
+            const keys = Object.keys(zip.files);
+            let kmlKey = keys.find(k => /doc\.kml$/i.test(k));
+            if (!kmlKey) kmlKey = keys.find(k => /\.kml$/i);
+            if (!kmlKey) throw new Error('KML tidak ditemukan setelah pemeriksaan ulang.');
+
+            log('KML path untuk diproses: ' + kmlKey);
+            // read kml text
+            let kmlText = await zip.files[kmlKey].async('text');
+            setProgress(30);
+            // clean invalid xml chars and BOM
+            kmlText = kmlText.replace(/^\uFEFF/, '');
+            kmlText = stripInvalidXmlChars(kmlText);
+            log('Membersihkan karakter tidak valid dan BOM. Panjang KML: ' + kmlText.length + ' karakter');
+
+            // parse xml and modify
+            const parser = new DOMParser();
+            let doc;
+            try {
+                doc = parser.parseFromString(kmlText, 'application/xml');
+                const parseError = doc.querySelector('parsererror');
+                if (parseError) {
+                    log('Parser error terdeteksi — mencoba perbaikan sederhana (hapus karakter kontrol tambahan)');
+                    // attempt to remove strange control chars and retry
+                    kmlText = kmlText.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+                    doc = parser.parseFromString(kmlText, 'application/xml');
+                }
+            } catch (e) {
+                throw new Error('Gagal parse KML: ' + e.message);
+            }
+
+            if (doc.querySelector('parsererror')) {
+                log('Parser masih error — akan menyimpan KML yang dibersihkan tapi mungkin masih invalid.');
+            } else {
+                log('KML berhasil di-parse sebagai XML.');
+            }
+
+            // Ensure there is at least one Placemark or coordinates
+            const hasPlacemark = doc.querySelectorAll('Placemark').length > 0;
+            const hasCoords = doc.querySelectorAll('coordinates').length > 0;
+            if (!hasPlacemark && !hasCoords) {
+                log('Tidak ada <Placemark> atau <coordinates>. Menambahkan placeholder Placemark.');
+                // Create simple placemark
+                const kmlElem = doc.documentElement || doc.getElementsByTagName('kml')[0];
+                if (kmlElem) {
+                    const docElem = doc.createElement('Document');
+                    const placemark = doc.createElement('Placemark');
+                    const name = doc.createElement('name'); name.textContent = 'Placeholder';
+                    const point = doc.createElement('Point');
+                    const coords = doc.createElement('coordinates'); coords.textContent = '0,0,0';
+                    point.appendChild(coords); placemark.appendChild(name); placemark.appendChild(point); docElem.appendChild(placemark);
+                    // if root is kml, append Document
+                    if (kmlElem.nodeName.toLowerCase() === 'kml') kmlElem.appendChild(docElem);
+                    else doc.appendChild(docElem);
+                }
+            }
+
+            // Fix hrefs to images: collect image hrefs and match files in zip
+            const hrefEls = Array.from(doc.querySelectorAll('href'));
+            log('Menemukan <href> sebanyak: ' + hrefEls.length);
+            const imagesToAdd = {};
+            for (const he of hrefEls) {
+                const href = he.textContent.trim();
+                if (!href) continue;
+                // if external (http/https) skip
+                if (/^https?:\/\//i.test(href)) continue;
+                // get basename
+                const base = href.split('/').pop().split('?')[0];
+                // find file in zip by case-insensitive match
+                const found = Object.keys(zip.files).find(k => k.split('/').pop().toLowerCase() === base.toLowerCase());
+                if (found) {
+                    log(`Membetulkan href '${href}' -> 'files/${base}' (ditemukan: ${found})`);
+                    imagesToAdd[base] = found; // map target basename -> source path in zip
+                    he.textContent = 'files/' + base;
+                } else {
+                    log(`Gambar referensi '${href}' tidak ada di archive. Melewatkan.`);
+                }
+            }
+
+            // Serialize XML back to string
+            const serializer = new XMLSerializer();
+            let fixedKml = serializer.serializeToString(doc);
+            // Ensure <?xml...?> header exists
+            if (!/^<\?xml/i.test(fixedKml)) {
+                fixedKml = '<?xml version="1.0" encoding="UTF-8"?>\n' + fixedKml;
+            }
+
+            // Build new zip: put doc.kml at root named doc.kml and files/
+            const outZip = new JSZip();
+            outZip.file('doc.kml', fixedKml);
+
+            // Add image files into files/
+            const imageKeys = Object.keys(imagesToAdd);
+            for (const base of imageKeys) {
+                const srcPath = imagesToAdd[base];
+                try {
+                    const arr = await zip.files[srcPath].async('arraybuffer');
+                    outZip.file('files/' + base, arr);
+                } catch (e) { log('Gagal copy ' + srcPath + ': ' + e.message); }
+            }
+
+            // Copy other non-kml resources that are not images we've already added
+            for (const k of Object.keys(zip.files)) {
+                // skip original kml if it's different
+                if (k === kmlKey) continue;
+                // skip ones we already mapped
+                const basename = k.split('/').pop();
+                if (imageKeys.find(x => x.toLowerCase() === basename.toLowerCase())) continue;
+                // skip directories
+                if (zip.files[k].dir) continue;
+                try {
+                    const arr = await zip.files[k].async('arraybuffer');
+                    // keep original path (unless it's a top-level file with same name as doc.kml)
+                    outZip.file(k, arr);
+                } catch (e) { log('Gagal copy ' + k + ': ' + e.message); }
+            }
+
+            setProgress(80);
+            log('Menyiapkan KMZ hasil perbaikan...');
+            const blob = await outZip.generateAsync({ type: 'blob' }, meta => {
+                // meta.percent can be used for progress
+                setProgress(80 + Math.floor(meta.percent / 5));
+            });
+            lastFixedBlob = blob;
+            lastReport = {
+                originalName,
+                kmlPath: kmlKey,
+                imagesMoved: imageKeys,
+                placemarkAdded: !hasPlacemark && !hasCoords
+            };
+
+            summaryBody.innerHTML = `Selesai: <strong>${escapeHtml(originalName)}</strong><br>KML: ${escapeHtml(kmlKey)}<br>Gambar dipindahkan: ${imageKeys.length}<br>Placeholder Placemark dibuat: ${lastReport.placemarkAdded}`;
+            downloadBtn.disabled = false;
+            setProgress(100);
+            log('Selesai. Siap download fixed KMZ.');
+        }
+    </script>
+</body>
+
+</html>
